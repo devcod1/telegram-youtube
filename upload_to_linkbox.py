@@ -1,93 +1,89 @@
-import sys
 import os
+import sys
+import json
 import hashlib
 import requests
 import subprocess
-
-# Check YouTube link argument
-if len(sys.argv) < 2:
-    print("Error: No YouTube link provided")
-    sys.exit(1)
-
-youtube_url = sys.argv[1]
+import tempfile
 
 LINKBOX_API_TOKEN = os.environ["LINKBOX_API_TOKEN"]
-UPLOAD_FOLDER_ID = os.environ.get("LINKBOX_FOLDER_ID", "0")
+LINKBOX_FOLDER_ID = os.environ.get("LINKBOX_FOLDER_ID", "0")
 
-# Download video using yt-dlp
-filename = "video.mp4"
-try:
-    subprocess.run(["yt-dlp", "-o", filename, youtube_url], check=True)
-except Exception as e:
-    print(f"Error downloading video: {str(e)}")
-    sys.exit(1)
-
-# MD5 of first 10 MB
-def md5_first_10mb(file_path):
-    m = hashlib.md5()
+def md5_of_first_10mb(file_path):
+    hash_md5 = hashlib.md5()
     with open(file_path, "rb") as f:
-        data = f.read(10 * 1024 * 1024)
-        m.update(data)
-    return m.hexdigest()
+        chunk = f.read(10 * 1024 * 1024)  # first 10 MB
+        hash_md5.update(chunk)
+    return hash_md5.hexdigest()
 
-file_md5 = md5_first_10mb(filename)
-file_size = os.path.getsize(filename)
-
-# Get upload URL
-resp = requests.get(
-    "https://www.linkbox.to/api/open/get_upload_url",
-    params={
+def get_upload_url(file_md5, file_size):
+    url = "https://www.linkbox.to/api/open/get_upload_url"
+    params = {
         "fileMd5ofPre10m": file_md5,
         "fileSize": file_size,
         "token": LINKBOX_API_TOKEN
     }
-).json()
+    r = requests.get(url, params=params)
+    r.raise_for_status()
+    data = r.json()
+    return data["data"]["signUrl"]
 
-if resp["status"] != 1:
-    print("Error getting upload URL:", resp)
-    sys.exit(1)
-
-sign_url = resp["data"]["signUrl"]
-
-# Upload file
-with open(filename, "rb") as f:
-    put_resp = requests.put(sign_url, data=f)
-
-if put_resp.status_code not in [200, 201]:
-    print("Upload failed")
-    sys.exit(1)
-
-# Create file item in LinkBox
-resp2 = requests.get(
-    "https://www.linkbox.to/api/open/folder_upload_file",
-    params={
+def create_file_item(file_md5, file_size, file_name):
+    url = "https://www.linkbox.to/api/open/folder_upload_file"
+    params = {
         "fileMd5ofPre10m": file_md5,
         "fileSize": file_size,
-        "pid": UPLOAD_FOLDER_ID,
-        "diyName": filename,
+        "pid": LINKBOX_FOLDER_ID,
+        "diyName": file_name,
         "token": LINKBOX_API_TOKEN
     }
-).json()
+    r = requests.get(url, params=params)
+    r.raise_for_status()
+    data = r.json()
+    if data["status"] != 1:
+        raise Exception(f"Upload item creation failed: {data}")
+    return data["data"]["itemId"]
 
-if resp2["status"] != 1:
-    print("Error creating file item:", resp2)
-    sys.exit(1)
+def upload_file_to_linkbox(file_path):
+    file_size = os.path.getsize(file_path)
+    file_md5 = md5_of_first_10mb(file_path)
+    file_name = os.path.basename(file_path)
 
-item_id = resp2["data"]["itemId"]
+    # Step 1: get upload URL
+    sign_url = get_upload_url(file_md5, file_size)
 
-# Share file
-resp3 = requests.get(
-    "https://www.linkbox.to/api/open/file_share",
-    params={
-        "itemIds": item_id,
-        "expire_enum": 4,
-        "token": LINKBOX_API_TOKEN
-    }
-).json()
+    # Step 2: upload file
+    with open(file_path, "rb") as f:
+        r = requests.put(sign_url, data=f)
+        r.raise_for_status()
 
-if resp3["status"] != 1:
-    print("Error sharing file:", resp3)
-    sys.exit(1)
+    # Step 3: create file item in LinkBox
+    item_id = create_file_item(file_md5, file_size, file_name)
+    return f"https://www.linkbox.to/file/{item_id}"
 
-share_link = resp3["data"]["shareToken"]
-print(f"Uploaded successfully! Link: https://www.linkbox.to/s/{share_link}")
+def download_youtube_video(url):
+    tmp_dir = tempfile.mkdtemp()
+    output_path = os.path.join(tmp_dir, "%(title)s.%(ext)s")
+    subprocess.run([
+        "yt-dlp", "-f", "best", "-o", output_path, url
+    ], check=True)
+    # Return path of downloaded file
+    files = os.listdir(tmp_dir)
+    if not files:
+        raise Exception("Download failed: no files found")
+    return os.path.join(tmp_dir, files[0])
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python upload_to_linkbox.py <youtube_url>")
+        sys.exit(1)
+
+    youtube_url = sys.argv[1]
+    try:
+        print("Downloading video...")
+        file_path = download_youtube_video(youtube_url)
+        print(f"Uploading {file_path} to LinkBox...")
+        link = upload_file_to_linkbox(file_path)
+        print(f"✅ Success! Link: {link}")
+    except Exception as e:
+        print(f"❌ Error: {e}")
