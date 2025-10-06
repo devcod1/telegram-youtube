@@ -10,27 +10,24 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
 
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      LINKBOX_API_TOKEN: ${{ secrets.LINKBOX_API_TOKEN }}
+      LINKBOX_FOLDER_ID: ${{ secrets.LINKBOX_FOLDER_ID }}
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install yt-dlp aiohttp python-telegram-bot --upgrade
+      - name: Upgrade pip and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install python-telegram-bot==20.5 yt-dlp aiohttp --upgrade
 
-    - name: Set environment variables
-      run: |
-        echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> $GITHUB_ENV
-        echo "LINKBOX_API_TOKEN=${{ secrets.LINKBOX_API_TOKEN }}" >> $GITHUB_ENV
-        echo "LINKBOX_FOLDER_ID=${{ secrets.LINKBOX_FOLDER_ID }}" >> $GITHUB_ENV
-
-    - name: Run bot
-      run: |
-        python bot/bot.py
+      - name: Run the bot
+        run: python bot/bot.py
