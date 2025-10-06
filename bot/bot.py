@@ -11,11 +11,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
 
     if "youtube.com" in text or "youtu.be" in text:
-        # Step 1: Send initial message
+        # Send initial message
         status_msg = await context.bot.send_message(chat_id, "Received YouTube link. Starting download...")
 
         try:
-            # Step 2: Run upload script with periodic message
+            # Run the upload script as subprocess
             process = subprocess.Popen(
                 ["python", "upload_to_linkbox.py", text],
                 stdout=subprocess.PIPE,
@@ -23,19 +23,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=True
             )
 
-            # Poll output line by line
+            # Poll stdout line by line
             while True:
                 line = process.stdout.readline()
                 if not line and process.poll() is not None:
                     break
                 if line:
-                    # Optionally update status every 3–5 lines
+                    # Only update message for relevant keywords
                     if any(keyword in line.lower() for keyword in ["downloading", "uploading"]):
-                        await status_msg.edit_text(line.strip())
+                        new_text = line.strip()
+                        if new_text != status_msg.text:
+                            await status_msg.edit_text(new_text)
 
+            # Get remaining output
             stdout, stderr = process.communicate()
 
-            # Step 3: Only send the final LinkBox link
+            # Extract LinkBox share link
             link_lines = [line for line in stdout.splitlines() if "https://www.linkbox.to/s/" in line]
             if link_lines:
                 await context.bot.send_message(chat_id, f"✅ Upload finished!\n{link_lines[-1]}")
