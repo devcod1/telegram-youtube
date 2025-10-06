@@ -1,45 +1,30 @@
-import os
-import subprocess
-import tempfile
-import shutil
+name: Telegram YouTube Bot
 
-LINKBOX_API_TOKEN = os.getenv("LINKBOX_API_TOKEN")
-LINKBOX_FOLDER_ID = os.getenv("LINKBOX_FOLDER_ID")
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
-if not LINKBOX_API_TOKEN or not LINKBOX_FOLDER_ID:
-    raise ValueError("LINKBOX_API_TOKEN and LINKBOX_FOLDER_ID must be set in environment variables!")
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
 
-async def upload_file_to_linkbox(youtube_url, update=None, context=None):
-    """
-    Download a YouTube video using yt-dlp and upload it to Linkbox.
-    Returns the public URL of the uploaded file.
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        try:
-            # Download YouTube video
-            cmd = [
-                "yt-dlp",
-                "-f", "best",
-                "-o", os.path.join(tmpdir, "%(title)s.%(ext)s"),
-                youtube_url
-            ]
-            process = subprocess.run(cmd, capture_output=True, text=True)
-            if process.returncode != 0:
-                raise RuntimeError(process.stderr)
+    steps:
+      - uses: actions/checkout@v3
 
-            # Find the downloaded file
-            files = os.listdir(tmpdir)
-            if not files:
-                raise RuntimeError("No file was downloaded.")
-            file_path = os.path.join(tmpdir, files[0])
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
 
-            # Upload to Linkbox
-            # This is a placeholder: replace with actual API call
-            # Example: use requests.post() to upload file
-            # For demonstration, we'll just return a fake URL
-            linkbox_url = f"https://linkbox.to/fake/{os.path.basename(file_path)}"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-            return linkbox_url
-
-        except Exception as e:
-            raise e
+      - name: Run Bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          LINKBOX_API_TOKEN: ${{ secrets.LINKBOX_API_TOKEN }}
+          LINKBOX_FOLDER_ID: ${{ secrets.LINKBOX_FOLDER_ID }}
+        run: python bot/bot.py
