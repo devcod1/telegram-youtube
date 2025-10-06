@@ -2,6 +2,7 @@ import os
 import subprocess
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+import asyncio
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
@@ -10,25 +11,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
 
     if "youtube.com" in text or "youtu.be" in text:
-        await context.bot.send_message(chat_id, "Received YouTube link. Uploading...")
+        # Step 1: Send initial message
+        status_msg = await context.bot.send_message(chat_id, "Received YouTube link. Starting download...")
 
         try:
-            # Call upload_to_linkbox.py in root folder
-            result = subprocess.run(
+            # Step 2: Run upload script with periodic message
+            process = subprocess.Popen(
                 ["python", "upload_to_linkbox.py", text],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True
             )
 
-            output = result.stdout.strip()
-            error_output = result.stderr.strip()
+            # Poll output line by line
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if line:
+                    # Optionally update status every 3–5 lines
+                    if any(keyword in line.lower() for keyword in ["downloading", "uploading"]):
+                        await status_msg.edit_text(line.strip())
 
-            if output:
-                await context.bot.send_message(chat_id, output)
-            elif error_output:
-                await context.bot.send_message(chat_id, f"Error: {error_output}")
+            stdout, stderr = process.communicate()
+
+            # Step 3: Only send the final LinkBox link
+            link_lines = [line for line in stdout.splitlines() if "https://www.linkbox.to/s/" in line]
+            if link_lines:
+                await context.bot.send_message(chat_id, f"✅ Upload finished!\n{link_lines[-1]}")
+            elif stderr:
+                await context.bot.send_message(chat_id, f"Error:\n{stderr}")
             else:
-                await context.bot.send_message(chat_id, "Error: upload script returned nothing.")
+                await context.bot.send_message(chat_id, "Error: Upload script returned nothing.")
+
         except Exception as e:
             await context.bot.send_message(chat_id, f"Exception: {str(e)}")
     else:
