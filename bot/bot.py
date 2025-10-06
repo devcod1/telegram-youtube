@@ -1,52 +1,34 @@
 # bot/bot.py
 import sys
 import os
-import asyncio
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    MessageHandler,
-    filters,
-)
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+import asyncio
 
-# Make repo root importable so we can import upload_to_linkbox from project root
+# allow importing upload_to_linkbox.py from repo root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-# Import your upload logic. It can be either a synchronous function or an async coroutine.
-# Expected signature: upload_file_to_linkbox(youtube_url) -> returns str (link) or raises Exception
-from upload_to_linkbox import upload_file_to_linkbox
+from upload_to_linkbox import upload_file_to_linkbox  # async function
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is missing")
-
-# Helper: call upload function, whether async or sync
-async def run_upload(youtube_url: str):
-    if asyncio.iscoroutinefunction(upload_file_to_linkbox):
-        # upload_file_to_linkbox is async
-        return await upload_file_to_linkbox(youtube_url)
-    else:
-        # upload_file_to_linkbox is blocking sync; run in threadpool
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, upload_file_to_linkbox, youtube_url)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     chat_id = update.effective_chat.id
 
     if not text or ("youtube.com" not in text and "youtu.be" not in text):
-        await context.bot.send_message(chat_id, "Please send a YouTube link (watch URL or youtu.be).")
+        await context.bot.send_message(chat_id, "Please send a single YouTube link (no playlists).")
         return
 
-    # Acknowledge quickly (short message to avoid flood)
-    ack = await context.bot.send_message(chat_id, "✅ Received. Downloading & uploading — I'll reply when finished.")
+    # Acknowledge quickly
+    await context.bot.send_message(chat_id, "✅ Received. Attempting to download & upload (no cookies). I'll reply when done.")
 
     try:
-        # Run the upload (this will run in async or threadpool as needed)
-        link = await run_upload(text)
+        # Call the async upload function (downloads then uploads)
+        link = await upload_file_to_linkbox(text)
 
-        # Ensure message is short enough
+        # Ensure message length safe
         link_msg = str(link)
         if len(link_msg) > 4000:
             link_msg = link_msg[:4000] + "\n...[truncated]"
@@ -54,24 +36,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id, f"✅ Done!\n{link_msg}")
 
     except Exception as e:
-        # Send short error message
-        err = str(e)
-        if len(err) > 1500:
-            err = err[:1500] + " ...[truncated]"
-        await context.bot.send_message(chat_id, f"❌ Error: {err}")
+        msg = str(e)
+        if len(msg) > 1500:
+            msg = msg[:1500] + " ...[truncated]"
+        # Provide a friendly, actionable message for auth-required errors
+        if "requires a signed-in session" in msg.lower() or "use --cookies" in msg.lower():
+            await context.bot.send_message(chat_id, "❌ This video requires signing in (YouTube blocked anonymous download). I can't download it without cookies/authentication.")
+        else:
+            await context.bot.send_message(chat_id, f"❌ Error: {msg}")
 
 def main():
-    """Synchronous entry point that starts polling. Do NOT wrap run_polling in asyncio.run()."""
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    # Run polling. close_loop=False prevents run_polling() from closing a loop owned by the environment.
-    # This avoids "Cannot close a running event loop" or "This event loop is already running".
-    try:
-        app.run_polling(close_loop=False)
-    except (KeyboardInterrupt, SystemExit):
-        # graceful exit
-        pass
+    # Important: prevent closing the environment's event loop
+    app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
     main()
