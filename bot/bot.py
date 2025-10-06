@@ -13,10 +13,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id, "Received YouTube link. Uploading...")
 
         try:
-            # Run upload script and capture both stdout and stderr
+            # Call upload_to_linkbox.py in root folder
             result = subprocess.run(
-                ["python", "../upload_to_linkbox.py", text],
-                capture_output=True, text=True
+                ["python", "upload_to_linkbox.py", text],
+                capture_output=True,
+                text=True
             )
 
             output = result.stdout.strip()
@@ -34,8 +35,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id, "Send a valid YouTube link.")
 
 if __name__ == "__main__":
-    from telegram.ext import ApplicationBuilder, MessageHandler, filters
-
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     app.run_polling()
