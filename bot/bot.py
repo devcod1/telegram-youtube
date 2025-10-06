@@ -11,11 +11,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
 
     if "youtube.com" in text or "youtu.be" in text:
-        # Send initial message
-        status_msg = await context.bot.send_message(chat_id, "Received YouTube link. Starting download...")
+        # Step 1: Send initial message
+        current_text = "Received YouTube link. Starting download..."
+        status_msg = await context.bot.send_message(chat_id, current_text)
 
         try:
-            # Run the upload script as subprocess
+            # Step 2: Run the upload script as subprocess
             process = subprocess.Popen(
                 ["python", "upload_to_linkbox.py", text],
                 stdout=subprocess.PIPE,
@@ -32,8 +33,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # Only update message for relevant keywords
                     if any(keyword in line.lower() for keyword in ["downloading", "uploading"]):
                         new_text = line.strip()
-                        if new_text != status_msg.text:
+                        if new_text != current_text:
                             await status_msg.edit_text(new_text)
+                            current_text = new_text  # ✅ update tracker
 
             # Get remaining output
             stdout, stderr = process.communicate()
