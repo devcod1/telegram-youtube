@@ -1,24 +1,38 @@
 import os
-from flask import Flask, request
+import time
 import requests
-
-app = Flask(__name__)
+import subprocess
+from telegram import Bot, Update
+from telegram.ext import Updater, MessageHandler, Filters
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+bot = Bot(token=TELEGRAM_TOKEN)
+updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+dispatcher = updater.dispatcher
 
-def send_telegram_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": chat_id, "text": text})
+LINKBOX_API_TOKEN = os.environ["LINKBOX_API_TOKEN"]
+UPLOAD_FOLDER_ID = os.environ.get("LINKBOX_FOLDER_ID", "0")
 
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
-def webhook():
-    data = request.json
-    chat_id = data["message"]["chat"]["id"]
-    text = data["message"]["text"]
+def handle_message(update, context):
+    text = update.message.text
+    chat_id = update.message.chat.id
 
-    # Just echo for now
-    send_telegram_message(chat_id, f"You sent: {text}")
-    return "OK"
+    if "youtube.com" in text or "youtu.be" in text:
+        bot.send_message(chat_id, "Received YouTube link. Uploading...")
+        # Call GitHub Actions script locally
+        try:
+            result = subprocess.run(
+                ["python", "../upload_to_linkbox.py", text],
+                capture_output=True, text=True
+            )
+            bot.send_message(chat_id, result.stdout)
+        except Exception as e:
+            bot.send_message(chat_id, f"Error: {str(e)}")
+    else:
+        bot.send_message(chat_id, "Send a valid YouTube link.")
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+handler = MessageHandler(Filters.text & (~Filters.command), handle_message)
+dispatcher.add_handler(handler)
+
+updater.start_polling()
+updater.idle()
