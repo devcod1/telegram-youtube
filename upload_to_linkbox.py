@@ -2,10 +2,9 @@ import sys
 import os
 import hashlib
 import requests
-import json
 import subprocess
 
-# Get YouTube URL from arguments
+# Check YouTube link argument
 if len(sys.argv) < 2:
     print("Error: No YouTube link provided")
     sys.exit(1)
@@ -15,7 +14,7 @@ youtube_url = sys.argv[1]
 LINKBOX_API_TOKEN = os.environ["LINKBOX_API_TOKEN"]
 UPLOAD_FOLDER_ID = os.environ.get("LINKBOX_FOLDER_ID", "0")
 
-# Step 1: Download video using yt-dlp
+# Download video using yt-dlp
 filename = "video.mp4"
 try:
     subprocess.run(["yt-dlp", "-o", filename, youtube_url], check=True)
@@ -23,18 +22,18 @@ except Exception as e:
     print(f"Error downloading video: {str(e)}")
     sys.exit(1)
 
-# Step 2: Get md5 of first 10MB for upload authorization
+# MD5 of first 10 MB
 def md5_first_10mb(file_path):
     m = hashlib.md5()
     with open(file_path, "rb") as f:
-        data = f.read(10 * 1024 * 1024)  # first 10 MB
+        data = f.read(10 * 1024 * 1024)
         m.update(data)
     return m.hexdigest()
 
 file_md5 = md5_first_10mb(filename)
 file_size = os.path.getsize(filename)
 
-# Step 3: Get upload authorization
+# Get upload URL
 resp = requests.get(
     "https://www.linkbox.to/api/open/get_upload_url",
     params={
@@ -50,7 +49,7 @@ if resp["status"] != 1:
 
 sign_url = resp["data"]["signUrl"]
 
-# Step 4: Upload video using PUT
+# Upload file
 with open(filename, "rb") as f:
     put_resp = requests.put(sign_url, data=f)
 
@@ -58,7 +57,7 @@ if put_resp.status_code not in [200, 201]:
     print("Upload failed")
     sys.exit(1)
 
-# Step 5: Create file item in LinkBox
+# Create file item in LinkBox
 resp2 = requests.get(
     "https://www.linkbox.to/api/open/folder_upload_file",
     params={
@@ -76,7 +75,7 @@ if resp2["status"] != 1:
 
 item_id = resp2["data"]["itemId"]
 
-# Step 6: Share the file and get the share link
+# Share file
 resp3 = requests.get(
     "https://www.linkbox.to/api/open/file_share",
     params={
