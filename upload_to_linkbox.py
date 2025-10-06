@@ -1,75 +1,94 @@
-import requests
-import hashlib
-import os
 import sys
-from yt_dlp import YoutubeDL
+import os
+import hashlib
+import requests
+import json
+import subprocess
 
-LINKBOX_TOKEN = os.environ['LINKBOX_API_TOKEN']
-UPLOAD_FOLDER_ID = int(os.environ.get('LINKBOX_FOLDER_ID', 0))
+# Get YouTube URL from arguments
+if len(sys.argv) < 2:
+    print("Error: No YouTube link provided")
+    sys.exit(1)
 
+youtube_url = sys.argv[1]
+
+LINKBOX_API_TOKEN = os.environ["LINKBOX_API_TOKEN"]
+UPLOAD_FOLDER_ID = os.environ.get("LINKBOX_FOLDER_ID", "0")
+
+# Step 1: Download video using yt-dlp
+filename = "video.mp4"
+try:
+    subprocess.run(["yt-dlp", "-o", filename, youtube_url], check=True)
+except Exception as e:
+    print(f"Error downloading video: {str(e)}")
+    sys.exit(1)
+
+# Step 2: Get md5 of first 10MB for upload authorization
 def md5_first_10mb(file_path):
-    with open(file_path, 'rb') as f:
-        data = f.read(10 * 1024 * 1024)  # first 10MB
-    return hashlib.md5(data).hexdigest()
+    m = hashlib.md5()
+    with open(file_path, "rb") as f:
+        data = f.read(10 * 1024 * 1024)  # first 10 MB
+        m.update(data)
+    return m.hexdigest()
 
-def get_upload_url(file_md5, file_size):
-    url = "https://www.linkbox.to/api/open/get_upload_url"
-    params = {
+file_md5 = md5_first_10mb(filename)
+file_size = os.path.getsize(filename)
+
+# Step 3: Get upload authorization
+resp = requests.get(
+    "https://www.linkbox.to/api/open/get_upload_url",
+    params={
         "fileMd5ofPre10m": file_md5,
         "fileSize": file_size,
-        "token": LINKBOX_TOKEN
+        "token": LINKBOX_API_TOKEN
     }
-    r = requests.get(url, params=params).json()
-    if r["status"] != 1:
-        raise Exception(r)
-    return r["data"]["signUrl"]
+).json()
 
-def upload_file(file_path, sign_url):
-    with open(file_path, 'rb') as f:
-        r = requests.put(sign_url, data=f)
-    if r.status_code not in [200, 201]:
-        raise Exception("Upload failed")
+if resp["status"] != 1:
+    print("Error getting upload URL:", resp)
+    sys.exit(1)
 
-def create_file_item(file_md5, file_size, file_name):
-    url = "https://www.linkbox.to/api/open/folder_upload_file"
-    params = {
+sign_url = resp["data"]["signUrl"]
+
+# Step 4: Upload video using PUT
+with open(filename, "rb") as f:
+    put_resp = requests.put(sign_url, data=f)
+
+if put_resp.status_code not in [200, 201]:
+    print("Upload failed")
+    sys.exit(1)
+
+# Step 5: Create file item in LinkBox
+resp2 = requests.get(
+    "https://www.linkbox.to/api/open/folder_upload_file",
+    params={
         "fileMd5ofPre10m": file_md5,
         "fileSize": file_size,
         "pid": UPLOAD_FOLDER_ID,
-        "diyName": file_name,
-        "token": LINKBOX_TOKEN
+        "diyName": filename,
+        "token": LINKBOX_API_TOKEN
     }
-    r = requests.get(url, params=params).json()
-    if r["status"] != 1:
-        raise Exception(r)
-    return r["data"]["itemId"]
+).json()
 
-def share_file(item_id):
-    url = "https://www.linkbox.to/api/open/file_share"
-    params = {
+if resp2["status"] != 1:
+    print("Error creating file item:", resp2)
+    sys.exit(1)
+
+item_id = resp2["data"]["itemId"]
+
+# Step 6: Share the file and get the share link
+resp3 = requests.get(
+    "https://www.linkbox.to/api/open/file_share",
+    params={
         "itemIds": item_id,
-        "expire_enum": 4,  # permanent
-        "token": LINKBOX_TOKEN
+        "expire_enum": 4,
+        "token": LINKBOX_API_TOKEN
     }
-    r = requests.get(url, params=params).json()
-    if r["status"] != 1:
-        raise Exception(r)
-    return r["data"]["shareToken"]
+).json()
 
-def download_youtube(url):
-    ydl_opts = {"outtmpl": "video.%(ext)s", "format": "best"}
-    with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url)
-        filename = ydl.prepare_filename(info)
-    return filename
+if resp3["status"] != 1:
+    print("Error sharing file:", resp3)
+    sys.exit(1)
 
-if __name__ == "__main__":
-    youtube_url = sys.argv[1]  # pass YouTube link
-    file_name = download_youtube(youtube_url)
-    file_size = os.path.getsize(file_name)
-    file_md5 = md5_first_10mb(file_name)
-    sign_url = get_upload_url(file_md5, file_size)
-    upload_file(file_name, sign_url)
-    item_id = create_file_item(file_md5, file_size, os.path.basename(file_name))
-    share_token = share_file(item_id)
-    print("LinkBox Share Link:", f"https://www.linkbox.to/s/{share_token}")
+share_link = resp3["data"]["shareToken"]
+print(f"Uploaded successfully! Link: https://www.linkbox.to/s/{share_link}")
