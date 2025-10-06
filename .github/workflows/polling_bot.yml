@@ -1,0 +1,30 @@
+name: Telegram Bot Polling
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # runs every 5 minutes
+  workflow_dispatch:        # allows manual run
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install python-telegram-bot yt-dlp requests
+
+      - name: Run Telegram Bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          LINKBOX_API_TOKEN: ${{ secrets.LINKBOX_API_TOKEN }}
+          LINKBOX_FOLDER_ID: ${{ secrets.LINKBOX_FOLDER_ID }}
+        run: |
+          python bot/bot.py
