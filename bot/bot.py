@@ -29,11 +29,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Main
 if __name__ == "__main__":
-    # Build the application
+    # Build the application and start polling
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    # Add message handler
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-
-    # Start polling
     app.run_polling()
