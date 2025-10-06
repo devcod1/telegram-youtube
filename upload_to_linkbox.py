@@ -6,8 +6,6 @@ import asyncio
 import tempfile
 import subprocess
 import shutil
-from typing import Optional
-
 import aiohttp
 
 LINKBOX_API_TOKEN = os.getenv("LINKBOX_API_TOKEN")
@@ -34,18 +32,15 @@ async def get_upload_url(session: aiohttp.ClientSession, file_md5: str, file_siz
 
 async def create_file_item(session: aiohttp.ClientSession, file_md5: str, file_size: int, file_name: str) -> str:
     url = "https://www.linkbox.to/api/open/folder_upload_file"
-    params = {
-        "fileMd5ofPre10m": file_md5,
-        "fileSize": file_size,
-        "pid": LINKBOX_FOLDER_ID,
-        "diyName": file_name,
-        "token": LINKBOX_API_TOKEN
-    }
+    params = {"fileMd5ofPre10m": file_md5, "fileSize": file_size, "pid": LINKBOX_FOLDER_ID, "diyName": file_name, "token": LINKBOX_API_TOKEN}
     async with session.get(url, params=params, timeout=60) as r:
         data = await r.json()
     if data.get("status") != 1:
         raise RuntimeError(f"folder_upload_file failed: {data}")
-    return data["data"].get("itemId")
+    item_id = data["data"].get("itemId")
+    if not item_id:
+        raise RuntimeError(f"folder_upload_file did not return itemId: {data}")
+    return item_id
 
 async def share_file(session: aiohttp.ClientSession, item_id: str) -> str:
     url = "https://www.linkbox.to/api/open/file_share"
@@ -54,13 +49,15 @@ async def share_file(session: aiohttp.ClientSession, item_id: str) -> str:
         data = await r.json()
     if data.get("status") != 1:
         raise RuntimeError(f"file_share failed: {data}")
-    return data["data"].get("shareToken")
+    token = data["data"].get("shareToken")
+    if not token:
+        raise RuntimeError(f"file_share did not return shareToken: {data}")
+    return token
 
 async def upload_file_via_signed_url(session: aiohttp.ClientSession, sign_url: str, file_path: str) -> None:
     file_size = os.path.getsize(file_path)
     headers = {"Content-Length": str(file_size)}
-    # Stream file via aiohttp (using blocking file object is okay for large files)
-    # aiohttp will iterate file object
+    # stream file via blocking file object (aiohttp will handle streaming)
     async with session.put(sign_url, data=open(file_path, "rb"), headers=headers, timeout=3600) as r:
         if r.status not in (200, 201):
             text = await r.text()
@@ -68,17 +65,10 @@ async def upload_file_via_signed_url(session: aiohttp.ClientSession, sign_url: s
 
 async def run_yt_dlp_no_cookies(youtube_url: str, tmpdir: str) -> str:
     out_template = os.path.join(tmpdir, "%(title)s.%(ext)s")
-    cmd = [
-        "yt-dlp",
-        "--no-playlist",  # ensure single video
-        "-f", "best",
-        "-o", out_template,
-        youtube_url
-    ]
+    cmd = ["yt-dlp", "--no-playlist", "-f", "best", "-o", out_template, youtube_url]
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, text=True)
     stdout, stderr = await proc.communicate()
     combined = (stdout or "") + "\n" + (stderr or "")
-    # detect auth-required messages
     low = combined.lower()
     if "sign in to confirm" in low or "use --cookies" in low or "authentication" in low:
         raise RuntimeError("This video requires a signed-in session (YouTube is blocking anonymous downloads). I can't download it without cookies/authentication.")
@@ -107,7 +97,9 @@ async def upload_file_to_linkbox(youtube_url: str) -> str:
             item_id = await create_file_item(session, file_md5, file_size, file_name)
             share_token = await share_file(session, item_id)
 
-        return f"https://www.linkbox.to/s/{share_token}"
+        # final link
+        final = f"https://www.linkbox.to/s/{share_token}"
+        return final
 
     finally:
         try:
@@ -115,7 +107,7 @@ async def upload_file_to_linkbox(youtube_url: str) -> str:
         except Exception:
             pass
 
-# CLI support
+# CLI
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python upload_to_linkbox.py <youtube_url>")
