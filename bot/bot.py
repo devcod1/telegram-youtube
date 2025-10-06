@@ -1,38 +1,39 @@
 import os
-import time
-import requests
 import subprocess
-from telegram import Bot, Update
-from telegram.ext import Updater, MessageHandler, Filters
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
+# Environment variables
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-bot = Bot(token=TELEGRAM_TOKEN)
-updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
-
 LINKBOX_API_TOKEN = os.environ["LINKBOX_API_TOKEN"]
 UPLOAD_FOLDER_ID = os.environ.get("LINKBOX_FOLDER_ID", "0")
 
-def handle_message(update, context):
+# Async handler for messages
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.message.chat.id
 
     if "youtube.com" in text or "youtu.be" in text:
-        bot.send_message(chat_id, "Received YouTube link. Uploading...")
-        # Call GitHub Actions script locally
+        await context.bot.send_message(chat_id, "Received YouTube link. Uploading...")
         try:
+            # Call the upload script
             result = subprocess.run(
                 ["python", "../upload_to_linkbox.py", text],
                 capture_output=True, text=True
             )
-            bot.send_message(chat_id, result.stdout)
+            await context.bot.send_message(chat_id, result.stdout)
         except Exception as e:
-            bot.send_message(chat_id, f"Error: {str(e)}")
+            await context.bot.send_message(chat_id, f"Error: {str(e)}")
     else:
-        bot.send_message(chat_id, "Send a valid YouTube link.")
+        await context.bot.send_message(chat_id, "Send a valid YouTube link.")
 
-handler = MessageHandler(Filters.text & (~Filters.command), handle_message)
-dispatcher.add_handler(handler)
+# Main
+if __name__ == "__main__":
+    # Build the application
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-updater.start_polling()
-updater.idle()
+    # Add message handler
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+
+    # Start polling
+    app.run_polling()
